@@ -1,8 +1,8 @@
 name: weekly-followers
 on:
   schedule:
-    - cron: '30 9 * * 5'        # UTC 周五 09:30 = 北京时间 17:30
-  workflow_dispatch:            # 允许手动触发测试
+    - cron: '30 8 */3 * *'
+  workflow_dispatch:
 
 jobs:
   fetch:
