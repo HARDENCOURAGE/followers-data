@@ -1,0 +1,23 @@
+name: weekly-followers
+on:
+  schedule:
+    - cron: '30 9 * * 5'        # UTC 周五 09:30 = 北京时间 17:30
+  workflow_dispatch:            # 允许手动触发测试
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install requests pandas urllib3
+      - run: python xueqiu_followers_cloud.py
+      - name: Commit data
+        run: |
+          git config user.name "followers-bot"
+          git config user.email "bot@users.noreply.github.com"
+          git add data/
+          git commit -m "followers $(date +%Y%m%d)" || echo "no changes"
+          git push
