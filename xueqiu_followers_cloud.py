@@ -152,7 +152,7 @@ try:
     top = qual.sort_values("rate_3d", ascending=False).groupby(
         qual["board"].str.contains("港").map({True: "hk", False: "cn"})).head(300)
     top = top.sort_values("rate_3d", ascending=False)
-    top[[c for c in keep if c in top.columns]].to_csv(f"{OUT}/f_{today}_top_rates.csv", index=False)
+    top.to_csv(f"{OUT}/f_{today}_top_rates.csv", index=False)
     d[["symbol", "followers", "board"]].to_csv(f"{OUT}/f_{today}_followers.csv", index=False)
 
     pd.DataFrame([{"date": today, "sh": len(sh), "sz": len(sz), "hk": len(hk),
