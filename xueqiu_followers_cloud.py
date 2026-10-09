@@ -108,81 +108,93 @@ for b in ["sh", "sz", "hk"]:
                 except: pass
 print(f"prev symbols: {len(prev_f)}")
 
-d = df.copy()
-d["prev"] = d["symbol"].map(prev_f)
-d["rate_3d"] = (d["followers"] - d["prev"]) / d["prev"] * 100
-d["chg_3d"] = d["followers"] - d["prev"]
-qual = d[(d["followers"] >= 100) & (d["prev"] > 0) & (d["rate_3d"].notna())]
-top = qual.sort_values("rate_3d", ascending=False).groupby(
-    qual["board"].str.contains("港").map({True: "hk", False: "cn"})).head(300)
-top = top.sort_values("rate_3d", ascending=False)
-top[[c for c in keep if c in top.columns]].to_csv(f"{OUT}/f_{today}_top_rates.csv", index=False)
-d[["symbol", "followers", "board"]].to_csv(f"{OUT}/f_{today}_followers.csv", index=False)
+try:
+    d = df.copy()
+    d["prev"] = d["symbol"].map(prev_f)
+    d["rate_3d"] = (d["followers"] - d["prev"]) / d["prev"] * 100
+    d["chg_3d"] = d["followers"] - d["prev"]
+    qual = d[(d["followers"] >= 100) & (d["prev"] > 0) & (d["rate_3d"].notna())]
+    top = qual.sort_values("rate_3d", ascending=False).groupby(
+        qual["board"].str.contains("港").map({True: "hk", False: "cn"})).head(300)
+    top = top.sort_values("rate_3d", ascending=False)
+    top[[c for c in keep if c in top.columns]].to_csv(f"{OUT}/f_{today}_top_rates.csv", index=False)
+    d[["symbol", "followers", "board"]].to_csv(f"{OUT}/f_{today}_followers.csv", index=False)
 
-pd.DataFrame([{"date": today, "sh": len(sh), "sz": len(sz), "hk": len(hk),
-               "pe_filled": df["pe_ttm"].notna().sum(), "total": len(df),
-               "prev_matched": int(d["prev"].notna().sum()),
-               "qualifying": len(qual)}]).to_csv(f"{OUT}/f_{today}_meta.csv", index=False)
-print(f"top_rates: {len(top)}, qualifying: {len(qual)}")
+    pd.DataFrame([{"date": today, "sh": len(sh), "sz": len(sz), "hk": len(hk),
+                   "pe_filled": df["pe_ttm"].notna().sum(), "total": len(df),
+                   "prev_matched": int(d["prev"].notna().sum()),
+                   "qualifying": len(qual)}]).to_csv(f"{OUT}/f_{today}_meta.csv", index=False)
+    print(f"top_rates: {len(top)}, qualifying: {len(qual)}")
+except Exception:
+    import traceback; traceback.print_exc()
+    print('STAGE_FAILED:', 'd = df.copy()')
 
-# ---- v6: 精简列 + 生成 Markdown 报告(便于下游静态读取) ----
-keep = ["symbol", "name", "board", "followers", "rate_3d", "chg_3d", "current",
-        "last_close", "percent", "market_capital", "turnover_rate",
-        "pe_ttm", "pb", "dividend_yield"]
-d6 = d[[c for c in keep if c in d.columns]].copy()
+try:
+    # ---- v6: 精简列 + 生成 Markdown 报告(便于下游静态读取) ----
+    keep = ["symbol", "name", "board", "followers", "rate_3d", "chg_3d", "current",
+            "last_close", "percent", "market_capital", "turnover_rate",
+            "pe_ttm", "pb", "dividend_yield"]
+    d6 = d[[c for c in keep if c in d.columns]].copy()
 
-def w2yi(v):
-    try: return f"{float(v)/1e8:.0f}"
-    except: return ""
+    def w2yi(v):
+        try: return f"{float(v)/1e8:.0f}"
+        except: return ""
 
-def fmt_pct(v):
-    try: return f"{float(v):.1f}"
-    except: return ""
+    def fmt_pct(v):
+        try: return f"{float(v):.1f}"
+        except: return ""
 
-def fmt_f(v):
-    try:
-        v = float(v)
-        return f"{v/10000:.1f}万" if v >= 10000 else f"{v:.0f}"
-    except: return ""
+    def fmt_f(v):
+        try:
+            v = float(v)
+            return f"{v/10000:.1f}万" if v >= 10000 else f"{v:.0f}"
+        except: return ""
 
-md = ["# 关注数变化率日报 " + today, "",
-      f"全市场 {len(df)} 只 | 匹配上期 {int(d['prev'].notna().sum())} 只 | 入围(关注>=100且有上期) {len(qual)} 只 | T-3 变化率降序", "",
-      "## A股 TOP300（T-3变化率降序）", "",
-      "|代码|名称|板块|关注T|T-3%|净增|现价|昨收|涨幅%|市值亿|换手%|PE|PB|股息率%|",
-      "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-cn = top[top["board"].str.contains("港") == False].head(300)
-for _, r in cn.iterrows():
-    md.append(f"|{r['symbol']}|{r['name']}|{r['board']}|{fmt_f(r['followers'])}|{fmt_pct(r['rate_3d'])}|{fmt_f(r['chg_3d'])}|{r.get('current','')}|{r.get('last_close','')}|{fmt_pct(r.get('percent'))}|{w2yi(r.get('market_capital'))}|{fmt_pct(r.get('turnover_rate'))}|{fmt_pct(r.get('pe_ttm'))}|{fmt_pct(r.get('pb'))}|{fmt_pct(r.get('dividend_yield'))}|")
-md += ["", "## 港股 TOP300（T-3变化率降序）", "",
-       "|代码|名称|板块|关注T|T-3%|净增|现价|昨收|涨幅%|市值亿|换手%|PE|PB|股息率%|",
-       "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
-hkm = top[top["board"].str.contains("港")].head(300)
-for _, r in hkm.iterrows():
-    md.append(f"|{r['symbol']}|{r['name']}|{r['board']}|{fmt_f(r['followers'])}|{fmt_pct(r['rate_3d'])}|{fmt_f(r['chg_3d'])}|{r.get('current','')}|{r.get('last_close','')}|{fmt_pct(r.get('percent'))}|{w2yi(r.get('market_capital'))}|{fmt_pct(r.get('turnover_rate'))}|{fmt_pct(r.get('pe_ttm'))}|{fmt_pct(r.get('pb'))}|{fmt_pct(r.get('dividend_yield'))}|")
+    md = ["# 关注数变化率日报 " + today, "",
+          f"全市场 {len(df)} 只 | 匹配上期 {int(d['prev'].notna().sum())} 只 | 入围(关注>=100且有上期) {len(qual)} 只 | T-3 变化率降序", "",
+          "## A股 TOP300（T-3变化率降序）", "",
+          "|代码|名称|板块|关注T|T-3%|净增|现价|昨收|涨幅%|市值亿|换手%|PE|PB|股息率%|",
+          "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    cn = top[top["board"].str.contains("港") == False].head(300)
+    for _, r in cn.iterrows():
+        md.append(f"|{r['symbol']}|{r['name']}|{r['board']}|{fmt_f(r['followers'])}|{fmt_pct(r['rate_3d'])}|{fmt_f(r['chg_3d'])}|{r.get('current','')}|{r.get('last_close','')}|{fmt_pct(r.get('percent'))}|{w2yi(r.get('market_capital'))}|{fmt_pct(r.get('turnover_rate'))}|{fmt_pct(r.get('pe_ttm'))}|{fmt_pct(r.get('pb'))}|{fmt_pct(r.get('dividend_yield'))}|")
+    md += ["", "## 港股 TOP300（T-3变化率降序）", "",
+           "|代码|名称|板块|关注T|T-3%|净增|现价|昨收|涨幅%|市值亿|换手%|PE|PB|股息率%|",
+           "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    hkm = top[top["board"].str.contains("港")].head(300)
+    for _, r in hkm.iterrows():
+        md.append(f"|{r['symbol']}|{r['name']}|{r['board']}|{fmt_f(r['followers'])}|{fmt_pct(r['rate_3d'])}|{fmt_f(r['chg_3d'])}|{r.get('current','')}|{r.get('last_close','')}|{fmt_pct(r.get('percent'))}|{w2yi(r.get('market_capital'))}|{fmt_pct(r.get('turnover_rate'))}|{fmt_pct(r.get('pe_ttm'))}|{fmt_pct(r.get('pb'))}|{fmt_pct(r.get('dividend_yield'))}|")
 
-os.makedirs("report", exist_ok=True)
-with open(f"report/r_{today}.md", "w", encoding="utf-8") as f:
-    f.write("\n".join(md))
-print("report.md rows:", len(cn), "+", len(hkm))
+    os.makedirs("report", exist_ok=True)
+    with open(f"report/r_{today}.md", "w", encoding="utf-8") as f:
+        f.write("\n".join(md))
+    print("report.md rows:", len(cn), "+", len(hkm))
+except Exception:
+    import traceback; traceback.print_exc()
+    print('STAGE_FAILED:', '# ---- v6: 精简列')
 
-# ---- v7: 原始数据 JSON 传输层(JSONL 嵌 HTML, 便于 Kimi 以读网页方式抓取) ----
-os.makedirs("raw", exist_ok=True)
-raw_cols = ["symbol", "name", "followers", "current", "last_close", "percent",
-            "market_capital", "turnover_rate", "pe_ttm", "pb", "dividend_yield", "board"]
-raw = d[[c for c in raw_cols if c in d.columns]].copy()
+try:
+    # ---- v7: 原始数据 JSON 传输层(JSONL 嵌 HTML, 便于 Kimi 以读网页方式抓取) ----
+    os.makedirs("raw", exist_ok=True)
+    raw_cols = ["symbol", "name", "followers", "current", "last_close", "percent",
+                "market_capital", "turnover_rate", "pe_ttm", "pb", "dividend_yield", "board"]
+    raw = d[[c for c in raw_cols if c in d.columns]].copy()
 
-def esc(v):
-    if v is None or (isinstance(v, float) and v != v):
-        return ""
-    return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    def esc(v):
+        if v is None or (isinstance(v, float) and v != v):
+            return ""
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
-for mk, part in [(sh, "sh"), (sz, "sz"), (hk, "hk")]:
-    half = (len(part) + 1) // 2
-    for i, chunkdf in enumerate([part.head(half), part.tail(len(part) - half)], 1):
-        lines = []
-        for _, r in chunkdf.iterrows():
-            lines.append("{" + ",".join(f'\"{k}\":\"{esc(r.get(k))}\"' for k in raw_cols if k in chunkdf.columns) + "}")
-        html = "<html><head><meta charset=\"utf-8\"></head><body><pre>" + "\n".join(lines) + "</pre></body></html>"
-        with open(f"raw/{today}_{mk}_{i}.html", "w", encoding="utf-8") as f:
-            f.write(html)
-        print(f"raw/{today}_{mk}_{i}.html rows={len(chunkdf)}")
+    for mk, part in [(sh, "sh"), (sz, "sz"), (hk, "hk")]:
+        half = (len(part) + 1) // 2
+        for i, chunkdf in enumerate([part.head(half), part.tail(len(part) - half)], 1):
+            lines = []
+            for _, r in chunkdf.iterrows():
+                lines.append("{" + ",".join(f'\"{k}\":\"{esc(r.get(k))}\"' for k in raw_cols if k in chunkdf.columns) + "}")
+            html = "<html><head><meta charset=\"utf-8\"></head><body><pre>" + "\n".join(lines) + "</pre></body></html>"
+            with open(f"raw/{today}_{mk}_{i}.html", "w", encoding="utf-8") as f:
+                f.write(html)
+            print(f"raw/{today}_{mk}_{i}.html rows={len(chunkdf)}")
+except Exception:
+    import traceback; traceback.print_exc()
+    print('STAGE_FAILED:', '# ---- v7: 原始数据')
