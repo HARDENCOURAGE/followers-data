@@ -76,6 +76,7 @@ df["dividend_yield"] = df["symbol"].map(dy)
 
 def board(sym):
     if sym.startswith("SH688"): return "科创板"
+    if sym.startswith("SH689"): return "科创板CDR"
     if sym.startswith(("SH600","SH601","SH603","SH605")): return "沪市主板"
     if sym.startswith(("SZ300","SZ301","SZ302")): return "创业板"
     if sym.startswith(("SZ000","SZ001","SZ002","SZ003")): return "深市主板"
@@ -85,6 +86,40 @@ def board(sym):
 
 df["board"] = df["symbol"].map(board)
 df = df.sort_values("followers", ascending=False)
+
+# ---- v10: 关注数兜底(列表接口缺失时, 用 status.json 逐个补) ----
+MISSING_BEFORE = 0
+FILLED = 0
+try:
+    _miss = df[df["followers"].isna() | (df["followers"] <= 0)]["symbol"].tolist()
+    MISSING_BEFORE = len(_miss)
+    print(f"followers missing: {MISSING_BEFORE}")
+    _fill = {}
+    for _i, _sym in enumerate(_miss):
+        if _i >= 5000:
+            break
+        _j = get_json(f"https://xueqiu.com/query/v1/symbol/search/status.json?count=1&page=1&symbol={_sym}", _sym)
+        try:
+            _f = _j["list"][0]["followers"]
+            if _f is not None:
+                _fill[_sym] = float(_f)
+        except Exception:
+            pass
+        if (_i + 1) % 300 == 0:
+            print(f"fill {_i+1}/{MISSING_BEFORE}, got {len(_fill)}")
+        time.sleep(random.uniform(0.4, 0.9))
+    _idx = df.set_index("symbol")
+    for _sym, _f in _fill.items():
+        try:
+            _idx.at[_sym, "followers"] = _f
+        except Exception:
+            pass
+    df["followers"] = _idx["followers"].values
+    FILLED = len(_fill)
+    print(f"followers filled: {FILLED}")
+except Exception:
+    import traceback; traceback.print_exc()
+    print("STAGE_FAILED: followers_fill")
 
 sh = df[df.symbol.str.startswith(("SH6", "SH9"))]
 sz = df[df.symbol.str.startswith(("SZ0", "SZ2", "SZ3"))]
@@ -198,3 +233,15 @@ try:
 except Exception:
     import traceback; traceback.print_exc()
     print('STAGE_FAILED:', '# ---- v7: 原始数据')
+
+
+
+# v10 meta 扩展
+try:
+    _m = pd.read_csv(f"{OUT}/f_{today}_meta.csv")
+    _m["followers_missing_before"] = [MISSING_BEFORE]
+    _m["followers_filled"] = [FILLED]
+    _m["hk_followers_filled"] = [int(df[df["board"].str.contains("港", na=False)]["followers"].notna().sum())]
+    _m.to_csv(f"{OUT}/f_{today}_meta.csv", index=False)
+except Exception:
+    import traceback; traceback.print_exc()
