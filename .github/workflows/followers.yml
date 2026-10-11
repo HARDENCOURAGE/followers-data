@@ -1,7 +1,7 @@
 name: weekly-followers
 on:
   schedule:
-    - cron: '30 8 */3 * *'
+    - cron: '0 16 11-30/3 * *'    # UTC 16:00 = 北京时间次日 00:00，每月逢3日周期的凌晨
   workflow_dispatch:
 
 jobs:
