@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""雪球全市场采集 - v15（+市场温度面板，每日运行）（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
+"""雪球全市场采集 - v16（+流通市值/成交额/关注密度独立指标）（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
 import time, random, os, re, glob, traceback
 import requests, urllib3, pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -62,7 +62,8 @@ df = pd.concat([crawl_list("CN", "sh_sz", "A股"), crawl_list("HK", "hk", "港�
                ignore_index=True)
 df = df.dropna(subset=["symbol"]).drop_duplicates(subset="symbol")
 log(f"pass1 total: {len(df)}")
-for c in ["current", "chg", "followers", "market_capital", "turnover_rate", "percent"]:
+for c in ["current", "chg", "followers", "market_capital", "float_market_capital",
+          "turnover_rate", "percent", "amount"]:
     if c in df.columns:
         df[c] = pd.to_numeric(df[c], errors="coerce")
 df["last_close"] = (df["current"] - df["chg"]).round(4)
@@ -133,7 +134,8 @@ def board(sym):
 df["board"] = df["symbol"].map(board)
 df = df.sort_values("followers", ascending=False)
 out_cols = ["symbol","name","followers","current","last_close","percent",
-            "market_capital","turnover_rate","pe_ttm","pb","dividend_yield"]
+            "market_capital","float_market_capital","amount",
+            "turnover_rate","pe_ttm","pb","dividend_yield"]
 sh = df[df.symbol.str.startswith(("SH6", "SH9"))]
 sz = df[df.symbol.str.startswith(("SZ0", "SZ2", "SZ3"))]
 hk = df[~df.index.isin(sh.index.union(sz.index))]
@@ -178,11 +180,16 @@ for W in (3, 7, 30, 90):
     d[f"chg_{W}d"] = d["followers"] - d[f"prev_{W}d"]
 log("rates computed")
 
+# 关注密度: 每亿流通市值带来的净增关注(人/亿), 独立指标不参与变化率混合
+_fl = d["float_market_capital"].where(d["float_market_capital"] > 0, d["market_capital"])
+d["density"] = d["chg_3d"] / (_fl / 1e8)
+d["density"] = d["density"].where(d["density"].abs() < 1e12)
 base = d[(d["followers"] >= 100) & (d["rate_3d"].notna())]
 key = base["board"].str.contains("港", na=False).map({True: "hk", False: "cn"})
 top3 = base.sort_values("rate_3d", ascending=False).groupby(key).head(300)
-rate_cols = ["symbol","name","board","followers","rate_3d","chg_3d","rate_7d","rate_30d","rate_90d",
-             "current","last_close","percent","market_capital","turnover_rate","pe_ttm","pb","dividend_yield"]
+rate_cols = ["symbol","name","board","followers","rate_3d","chg_3d","density","rate_7d","rate_30d","rate_90d",
+             "current","last_close","percent","market_capital","float_market_capital","amount",
+             "turnover_rate","pe_ttm","pb","dividend_yield"]
 top3[[c for c in rate_cols if c in top3.columns]].to_csv(f"{OUT}/f_{today}_top_rates.csv", index=False)
 d[["symbol","followers","board"]].to_csv(f"{OUT}/f_{today}_followers.csv", index=False)
 
@@ -233,14 +240,23 @@ def fw(v):
         v = float(v)
         return f"{v/10000:.1f}万" if v >= 10000 else f"{v:.0f}"
     except Exception: return ""
+def awan(v):
+    try: return f"{float(v)/1e4:.0f}"
+    except Exception: return ""
+def fd(v):
+    try:
+        x = float(v)
+        return f"{x:.1f}" if x == x and abs(x) < 1e12 else "\u2014"
+    except Exception:
+        return "\u2014"
 def row_md(r):
     return (f"|{r['symbol']}|{r['name']}|{r['board']}|{fw(r['followers'])}"
             f"|{pct(r['rate_3d'])}|{pct(r['rate_7d'])}|{pct(r['rate_30d'])}|{pct(r['rate_90d'])}"
-            f"|{fw(r['chg_3d'])}|{r.get('current','')}|{pct(r.get('percent'))}"
-            f"|{w2yi(r.get('market_capital'))}|{pct(r.get('turnover_rate'))}"
+            f"|{fw(r['chg_3d'])}|{fd(r.get('density'))}|{r.get('current','')}|{pct(r.get('percent'))}"
+            f"|{w2yi(r.get('market_capital'))}|{w2yi(r.get('float_market_capital'))}|{awan(r.get('amount'))}|{pct(r.get('turnover_rate'))}"
             f"|{pct(r.get('pe_ttm'))}|{pct(r.get('pb'))}|{pct(r.get('dividend_yield'))}|")
-HDR = ("|代码|名称|板块|关注T|T-3%|T-7%|T-30%|T-90%|净增|现价|涨幅%|市值亿|换手%|PE|PB|股息率%|\n"
-       "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+HDR = ("|代码|名称|板块|关注T|T-3%|T-7%|T-30%|T-90%|净增|关注密度|现价|涨幅%|市值亿|流通亿|成交额万|换手%|PE|PB|股息率%|\n"
+       "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 md = [f"# 关注数变化率日报 {today}", "",
       f"全市场 {len(df)} 只 | 入围(关注>=100) {len(base)} 只 | 窗口覆盖 T-3:{win[3]} T-7:{win[7]} T-30:{win[30]} T-90:{win[90]} (—=积累中)", "",
       "## 市场温度（T-3 口径）", "",
