@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""雪球全市场采集 - v14（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
+"""雪球全市场采集 - v15（+市场温度面板，每日运行）（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
 import time, random, os, re, glob, traceback
 import requests, urllib3, pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -197,6 +197,26 @@ meta = {"date": today, "sh": len(sh), "sz": len(sz), "hk": len(hk),
 pd.DataFrame([meta]).to_csv(f"{OUT}/f_{today}_meta.csv", index=False)
 log(f"meta: {meta}")
 
+# ---------- STAGE 5.5: 市场温度 ----------
+stage("temperature")
+temp_rows = []
+d["mk"] = d["board"].str.contains("港", na=False).map({True: "港股", False: "A股"})
+d.loc[d["symbol"].str.startswith("SH"), "mk"] = "沪市"
+d.loc[d["symbol"].str.startswith("SZ"), "mk"] = "深市"
+for mkname in ["A股", "沪市", "深市", "港股"]:
+    sub = d[d["mk"] == mkname]
+    f, base, chg = sub["followers"], sub["prev_3d"], sub["chg_3d"]
+    tot, baset = float(f.sum()), float(base.sum())
+    temp_rows.append({
+        "market": mkname, "stocks": int(len(sub)),
+        "total_wan": round(tot / 1e4, 1),
+        "net_wan": round(float(chg.sum()) / 1e4, 2),
+        "pct": round((tot - baset) / baset * 100, 3) if baset > 0 else None,
+        "up": int((chg > 0).sum()), "down": int((chg < 0).sum()), "flat": int((chg == 0).sum()),
+        "median_pct": round(float(chg.median()), 3) if len(chg.dropna()) else None})
+pd.DataFrame(temp_rows).to_csv(f"{OUT}/f_{today}_temperature.csv", index=False)
+log("temperature:", temp_rows)
+
 # ---------- STAGE 6: report.md ----------
 stage("report")
 def w2yi(v):
@@ -222,7 +242,15 @@ def row_md(r):
 HDR = ("|代码|名称|板块|关注T|T-3%|T-7%|T-30%|T-90%|净增|现价|涨幅%|市值亿|换手%|PE|PB|股息率%|\n"
        "|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 md = [f"# 关注数变化率日报 {today}", "",
-      f"全市场 {len(df)} 只 | 入围(关注>=100) {len(base)} 只 | 窗口覆盖 T-3:{win[3]} T-7:{win[7]} T-30:{win[30]} T-90:{win[90]} (—=积累中)", ""]
+      f"全市场 {len(df)} 只 | 入围(关注>=100) {len(base)} 只 | 窗口覆盖 T-3:{win[3]} T-7:{win[7]} T-30:{win[30]} T-90:{win[90]} (—=积累中)", "",
+      "## 市场温度（T-3 口径）", "",
+      "|市场|样本|关注总数(万)|净增(万)|增减幅%|涨家数|跌家数|平家数|中位变化%|",
+      "|---|---|---|---|---|---|---|---|---|"]
+for t in temp_rows:
+    p = f"{t['pct']:+.3f}" if t["pct"] is not None else "—"
+    m = f"{t['median_pct']:+.3f}" if t["median_pct"] is not None else "—"
+    md.append(f"|{t['market']}|{t['stocks']}|{t['total_wan']}|{t['net_wan']:+.2f}|{p}|{t['up']}|{t['down']}|{t['flat']}|{m}|")
+md.append("")
 for label, is_hk in [("A股", False), ("港股", True)]:
     sub = top3[top3["board"].str.contains("港", na=False) == is_hk]
     md += [f"## {label} TOP300（T-3变化率降序）", "", HDR]
