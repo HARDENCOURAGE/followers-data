@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""雪球全市场采集 - v12（多窗口变化率：T-3/7/30/90 + T-30增速榜 + 原始JSON传输层）"""
+"""雪球全市场采集 - v14（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
 import time, random, os, re, glob, traceback
 import requests, urllib3, pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -156,7 +156,9 @@ for b in ["sh", "sz", "hk"]:
             continue
         for sym, f in zip(old["symbol"], old["followers"]):
             try:
-                hist.setdefault(sym, {})[m.group(1)] = float(f)
+                fv = float(f)
+                if fv == fv and fv > 0:
+                    hist.setdefault(sym, {})[m.group(1)] = fv
             except Exception:
                 pass
 log(f"history symbols: {len(hist)}")
@@ -201,8 +203,11 @@ def w2yi(v):
     try: return f"{float(v)/1e8:.0f}"
     except Exception: return ""
 def pct(v):
-    try: return f"{float(v):.1f}"
-    except Exception: return "—"
+    try:
+        x = float(v)
+        return f"{x:.1f}" if x == x else "\u2014"
+    except Exception:
+        return "\u2014"
 def fw(v):
     try:
         v = float(v)
