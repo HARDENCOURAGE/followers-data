@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""雪球全市场采集 - v16（+流通市值/成交额/关注密度独立指标）（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
+"""雪球全市场采集 - v17（+流通市值/成交额/关注密度独立指标）（T-3/7/30/90 四窗口[自动取最近可得历史] + NaN快照跳过 + 原始JSON传输层）"""
 import time, random, os, re, glob, traceback
 import requests, urllib3, pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -153,7 +153,7 @@ for b in ["sh", "sz", "hk"]:
         if not m or m.group(1) >= today:
             continue
         try:
-            old = pd.read_csv(fp, usecols=["symbol", "followers"])
+            old = pd.read_csv(fp, usecols=["symbol", "followers"], dtype={"symbol": str})
         except Exception:
             continue
         for sym, f in zip(old["symbol"], old["followers"]):
@@ -210,8 +210,9 @@ temp_rows = []
 d["mk"] = d["board"].str.contains("港", na=False).map({True: "港股", False: "A股"})
 d.loc[d["symbol"].str.startswith("SH"), "mk"] = "沪市"
 d.loc[d["symbol"].str.startswith("SZ"), "mk"] = "深市"
-for mkname in ["A股", "沪市", "深市", "港股"]:
-    sub = d[d["mk"] == mkname]
+for mkname, sub in [("A股", d[d["mk"].isin(["沪市", "深市"])]),
+                    ("沪市", d[d["mk"] == "沪市"]), ("深市", d[d["mk"] == "深市"]),
+                    ("港股", d[d["mk"] == "港股"])]:
     f, base, chg = sub["followers"], sub["prev_3d"], sub["chg_3d"]
     tot, baset = float(f.sum()), float(base.sum())
     temp_rows.append({
